@@ -47,7 +47,7 @@ def scrapeSource(url, magicFrag='2016', scrapperFunction=getNYTPost, token=None)
                body = scrapperFunction(url, token)
                if (body and len(body)>0):
                    urlBodies[url] = body
-               print (url)
+               """print (url)"""
         except:
             numErr =+ 1
     return urlBodies
@@ -61,20 +61,21 @@ class FrequencySummarizer:
                               list(punctuation) +
                               [u"'s",'"'])
     
-    def _compute_frequencies(self,word_sent,customStopWords=None):
+    def _compute_frequencies(self,word_sent):
         freq = defaultdict(int)
-        if customStopWords is None:
-            stopwords = set(self._stopwords)
-        else:
-            stopwords = set(customStopWords).union(self._stopwords)
+     
         for sentence in word_sent:
             for word in sentence:
-                if word not in stopwords:
+                if word not in self._stopwords:
                     freq[word] += 1
-        m = float(max(freq.values()))
+        try:
+            m = float(max(freq.values()))
+        except:
+            m = 1
+        print (m)
         for word in list(freq.keys()):
             freq[word] = freq[word]/m
-            if freq[word] >= self._max_cut or freq[word] <= self._min_cut:
+            if freq[word] > self._max_cut or freq[word] < self._min_cut:
                 del freq[word]
         return freq
     
@@ -83,7 +84,7 @@ class FrequencySummarizer:
         title = article[1]
         sentences = sent_tokenize(text)
         word_sent = [word_tokenize(s.lower()) for s in sentences]
-        self._freq = self._compute_frequencies(word_sent,customStopWords)
+        self._freq = self._compute_frequencies(word_sent)
         if n < 0:
             return nlargest(len(self._freq.keys()),self._freq,key=self._freq.get)
         else:
@@ -117,8 +118,6 @@ class FrequencySummarizer:
         return [sentences[j] for j in sentences_index]
 
 
-# In[ ]:
-
 
 urlWashingtonPostNonTech = "https://www.washingtonpost.com/sports"
 urlNewYorkTimesNonTech = "https://www.nytimes.com/pages/sports/index.html"
@@ -130,7 +129,7 @@ washingtonPostTechArticles = scrapeSource(urlWashingtonPostTech,
                                          getwashingtonPost,
                                          'article') 
 washingtonPostNonTechArticles = scrapeSource(urlWashingtonPostNonTech,
-                                          '2016',
+                                          '2017',
                                          getwashingtonPost,
                                          'article')
                 
@@ -145,5 +144,47 @@ newYorkTimesNonTechArticles = scrapeSource(urlNewYorkTimesNonTech,
                                        None)
 
 
+articleSummaries = {}
 
-           
+for techUrlDict in [washingtonPostTechArticles, newYorkTimesTechArticles]:
+    for articleUrl in techUrlDict:
+        if techUrlDict[articleUrl][1] is not None:
+            if len(techUrlDict[articleUrl][1])>0:
+                fs = FrequencySummarizer()
+                summary = fs.extractFeatures(techUrlDict[articleUrl], 25)
+                articleSummaries[articleUrl] = {'feature-vector': summary, 'label':'tech'}
+            
+            
+for nonTechUrlDict in [washingtonPostNonTechArticles, newYorkTimesNonTechArticles]:
+    for articleUrl in nonTechUrlDict:
+        if nonTechUrlDict[articleUrl][1] is not None:
+            if len(nonTechUrlDict[articleUrl][1])>0:
+                fs = FrequencySummarizer()
+                summary = fs.extractFeatures(nonTechUrlDict[articleUrl], 25)
+                articleSummaries[articleUrl] = {'feature-vector': summary, 'label':'non-tech'}
+            
+def getDoxeyDonkey(url, token):
+    response = requests.get(url).content
+    soup = BeautifulSoup(response, 'html.parser')
+    title = soup.title.text
+    divs = soup.findAll('div', class_=token)
+    text = ' '.join(map(lambda p: p.text, divs))
+    return text, title
+
+testUrl = "http://doxydonkey.blogspot.in"
+testArticle = getDoxeyDonkey(testUrl, 'post-body')
+fs = FrequencySummarizer()
+testArticleSummary = fs.extractFeatures(testArticle, 25)
+
+similarities = {}
+for articleUrl in articleSummaries:
+    oneArticleSummary = articleSummaries[articleUrl]['feature-vector']
+    similarities[articleUrl] = len((set(testArticleSummary)).intersection(set(oneArticleSummary)))
+
+labels = defaultdict(int)
+knn = nlargest(5, similarities, key=similarities.get)
+for oneNeighbour in knn:
+    labels[articleSummaries[oneNeighbour]['label']] += 1
+
+final = nlargest(1, labels, key=labels.get)
+print (final)
